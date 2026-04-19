@@ -1,9 +1,12 @@
 import os
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 OUTPUT_DIR = "docs"
 OUTPUT_FILE = os.path.join(OUTPUT_DIR, "combined.ics")
+
+PAST_DAYS = 30
+FUTURE_DAYS = 270
 
 CALENDARS = [
     ("ICAL_URL_GOPHERSFOOTBALL", "🏈"),
@@ -13,25 +16,81 @@ CALENDARS = [
     ("ICAL_URL_VIKINGS", "🏈"),
 ]
 
+
 def normalize_url(url):
     url = url.strip()
     if url.lower().startswith("webcal://"):
         return "https://" + url[len("webcal://"):]
     return url
 
+
 def prefix_summary(event_lines, emoji):
     updated = []
-    changed = False
-
     for line in event_lines:
         if line.startswith("SUMMARY:"):
             summary = line[len("SUMMARY:"):].strip()
             if not summary.startswith(emoji):
                 line = f"SUMMARY:{emoji} {summary}"
-            changed = True
         updated.append(line)
+    return updated
 
-    return updated, changed
+
+def unfold_ics_lines(lines):
+    unfolded = []
+    for line in lines:
+        if unfolded and (line.startswith(" ") or line.startswith("\t")):
+            unfolded[-1] += line[1:]
+        else:
+            unfolded.append(line)
+    return unfolded
+
+
+def get_prop_value(event_lines, prop_name):
+    prefix = prop_name + ":"
+    alt_prefix = prop_name + ";"
+    for line in event_lines:
+        if line.startswith(prefix):
+            return line[len(prefix):].strip()
+        if line.startswith(alt_prefix):
+            parts = line.split(":", 1)
+            if len(parts) == 2:
+                return parts[1].strip()
+    return None
+
+
+def parse_dtstart(event_lines):
+    value = get_prop_value(event_lines, "DTSTART")
+    if not value:
+        return None
+
+    value = value.strip()
+
+    # DATE only: 20260427
+    if len(value) == 8 and value.isdigit():
+        try:
+            return datetime.strptime(value, "%Y%m%d").replace(tzinfo=timezone.utc)
+        except ValueError:
+            return None
+
+    # UTC datetime: 20251005T010000Z
+    if value.endswith("Z"):
+        try:
+            return datetime.strptime(value, "%Y%m%dT%H%M%SZ").replace(tzinfo=timezone.utc)
+        except ValueError:
+            return None
+
+    # Floating/local datetime: 20251005T010000
+    try:
+        return datetime.strptime(value, "%Y%m%dT%H%M%S").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+
+
+def in_date_window(event_lines, window_start, window_end):
+    dtstart = parse_dtstart(event_lines)
+    if dtstart is None:
+        return True
+    return window_start <= dtstart <= window_end
 
 
 calendar_sources = []
@@ -43,14 +102,31 @@ for secret_name, emoji in CALENDARS:
 if not calendar_sources:
     raise RuntimeError("No calendar URLs found in GitHub Actions secrets.")
 
+now = datetime.now(timezone.utc)
+window_start = now - timedelta(days=PAST_DAYS)
+window_end = now + timedelta(days=FUTURE_DAYS)
+
 events = []
 seen_uids = set()
+per_calendar_counts = {}
+per_calendar_skipped_dupe = {}
+per_calendar_skipped_window = {}
+per_calendar_errors = {}
 
 for url, emoji, secret_name in calendar_sources:
-    with urllib.request.urlopen(url) as response:
-        text = response.read().decode("utf-8", errors="replace")
+    per_calendar_counts[secret_name] = 0
+    per_calendar_skipped_dupe[secret_name] = 0
+    per_calendar_skipped_window[secret_name] = 0
 
-    lines = text.splitlines()
+    try:
+        with urllib.request.urlopen(url) as response:
+            text = response.read().decode("utf-8", errors="replace")
+    except Exception as e:
+        per_calendar_errors[secret_name] = str(e)
+        print(f"[ERROR] {secret_name}: {e}")
+        continue
+
+    lines = unfold_ics_lines(text.splitlines())
     in_event = False
     event_lines = []
 
@@ -65,19 +141,20 @@ for url, emoji, secret_name in calendar_sources:
             event_lines.append(line)
             in_event = False
 
-            uid = None
-            for ev_line in event_lines:
-                if ev_line.startswith("UID:"):
-                    uid = ev_line[4:].strip()
-                    break
-
+            uid = get_prop_value(event_lines, "UID")
             if uid and uid in seen_uids:
+                per_calendar_skipped_dupe[secret_name] += 1
                 continue
             if uid:
                 seen_uids.add(uid)
 
-            event_lines, _ = prefix_summary(event_lines, emoji)
+            if not in_date_window(event_lines, window_start, window_end):
+                per_calendar_skipped_window[secret_name] += 1
+                continue
+
+            event_lines = prefix_summary(event_lines, emoji)
             events.append(event_lines)
+            per_calendar_counts[secret_name] += 1
 
         elif in_event:
             event_lines.append(line)
@@ -101,4 +178,25 @@ with open(OUTPUT_FILE, "w", encoding="utf-8", newline="\r\n") as f:
 
     f.write("END:VCALENDAR\r\n")
 
-print(f"Wrote {OUTPUT_FILE} with {len(events)} events from {len(calendar_sources)} source calendars.")
+print("")
+print("Calendar merge summary")
+print("----------------------")
+for secret_name, _emoji in CALENDARS:
+    if secret_name in per_calendar_errors:
+        print(f"{secret_name}: ERROR - {per_calendar_errors[secret_name]}")
+    elif secret_name in per_calendar_counts:
+        print(
+            f"{secret_name}: kept={per_calendar_counts[secret_name]}, "
+            f"dupe_skipped={per_calendar_skipped_dupe[secret_name]}, "
+            f"window_skipped={per_calendar_skipped_window[secret_name]}"
+        )
+
+print("")
+print(
+    f"Wrote {OUTPUT_FILE} with {len(events)} total events "
+    f"from {len(calendar_sources)} configured source calendars."
+)
+print(
+    f"Date window: {window_start.strftime('%Y-%m-%d')} "
+    f"to {window_end.strftime('%Y-%m-%d')}"
+)
