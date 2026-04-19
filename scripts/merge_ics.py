@@ -14,6 +14,9 @@ CALENDARS = [
     ("ICAL_URL_TIMBERWOLVES", "🏀"),
     ("ICAL_URL_TWINS", "⚾"),
     ("ICAL_URL_VIKINGS", "🏈"),
+    ("ICAL_URL_WILD", "🏒"),
+    ("ICAL_URL_GOPHERMENSBASKETBALL", "🦫🏀"),
+    ("ICAL_URL_GOPHERWOMENSBASKETBALL", "🦫💃🏀"),
 ]
 
 
