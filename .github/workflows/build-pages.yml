@@ -33,6 +33,9 @@ jobs:
           ICAL_URL_TIMBERWOLVES: ${{ secrets.ICAL_URL_TIMBERWOLVES }}
           ICAL_URL_TWINS: ${{ secrets.ICAL_URL_TWINS }}
           ICAL_URL_VIKINGS: ${{ secrets.ICAL_URL_VIKINGS }}
+          ICAL_URL_WILD: ${{ secrets.ICAL_URL_WILD }}
+          ICAL_URL_GOPHERWOMENSBASKETBALL: ${{ secrets.ICAL_URL_GOPHERWOMENSBASKETBALL }}
+          ICAL_URL_GOPHERMENSBASKETBALL: ${{ secrets.ICAL_URL_GOPHERMENSBASKETBALL }}
         run: python scripts/merge_ics.py
 
       - name: Configure Pages
