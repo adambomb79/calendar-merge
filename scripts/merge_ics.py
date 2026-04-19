@@ -5,8 +5,8 @@ from datetime import datetime, timezone, timedelta
 OUTPUT_DIR = "docs"
 OUTPUT_FILE = os.path.join(OUTPUT_DIR, "combined.ics")
 
-PAST_DAYS = 30
-FUTURE_DAYS = 270
+PAST_DAYS = 120
+FUTURE_DAYS = 400
 
 CALENDARS = [
     ("ICAL_URL_GOPHERSFOOTBALL", "🏈"),
