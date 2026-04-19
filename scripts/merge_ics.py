@@ -5,22 +5,43 @@ from datetime import datetime, timezone
 OUTPUT_DIR = "docs"
 OUTPUT_FILE = os.path.join(OUTPUT_DIR, "combined.ics")
 
-calendar_urls = []
-i = 1
-while True:
-    value = os.getenv(f"ICAL_URL_{i}")
-    if not value:
-        break
-    calendar_urls.append(value.strip())
-    i += 1
+CALENDARS = [
+    ("ICAL_URL_GOPHERSFOOTBALL", "🏈"),
+    ("ICAL_URL_NFLPRIMETIME", "🏈"),
+    ("ICAL_URL_TIMBERWOLVES", "🏀"),
+    ("ICAL_URL_TWINS", "⚾"),
+    ("ICAL_URL_VIKINGS", "🏈"),
+]
 
-if not calendar_urls:
-    raise RuntimeError("No calendar URLs found. Set ICAL_URL_1, ICAL_URL_2, etc.")
+
+def prefix_summary(event_lines, emoji):
+    updated = []
+    changed = False
+
+    for line in event_lines:
+        if line.startswith("SUMMARY:"):
+            summary = line[len("SUMMARY:"):].strip()
+            if not summary.startswith(emoji):
+                line = f"SUMMARY:{emoji} {summary}"
+            changed = True
+        updated.append(line)
+
+    return updated, changed
+
+
+calendar_sources = []
+for secret_name, emoji in CALENDARS:
+    url = os.getenv(secret_name)
+    if url:
+        calendar_sources.append((url.strip(), emoji, secret_name))
+
+if not calendar_sources:
+    raise RuntimeError("No calendar URLs found in GitHub Actions secrets.")
 
 events = []
 seen_uids = set()
 
-for url in calendar_urls:
+for url, emoji, secret_name in calendar_sources:
     with urllib.request.urlopen(url) as response:
         text = response.read().decode("utf-8", errors="replace")
 
@@ -29,10 +50,13 @@ for url in calendar_urls:
     event_lines = []
 
     for line in lines:
-        if line.strip() == "BEGIN:VEVENT":
+        stripped = line.strip()
+
+        if stripped == "BEGIN:VEVENT":
             in_event = True
             event_lines = [line]
-        elif line.strip() == "END:VEVENT" and in_event:
+
+        elif stripped == "END:VEVENT" and in_event:
             event_lines.append(line)
             in_event = False
 
@@ -42,12 +66,14 @@ for url in calendar_urls:
                     uid = ev_line[4:].strip()
                     break
 
+            if uid and uid in seen_uids:
+                continue
             if uid:
-                if uid in seen_uids:
-                    continue
                 seen_uids.add(uid)
 
+            event_lines, _ = prefix_summary(event_lines, emoji)
             events.append(event_lines)
+
         elif in_event:
             event_lines.append(line)
 
@@ -60,8 +86,8 @@ with open(OUTPUT_FILE, "w", encoding="utf-8", newline="\r\n") as f:
     f.write("VERSION:2.0\r\n")
     f.write("PRODID:-//Calendar Merge//EN\r\n")
     f.write("CALSCALE:GREGORIAN\r\n")
-    f.write(f"X-WR-CALNAME:Merged Calendar\r\n")
-    f.write(f"X-WR-TIMEZONE:UTC\r\n")
+    f.write("X-WR-CALNAME:Merged Calendar\r\n")
+    f.write("X-WR-TIMEZONE:UTC\r\n")
     f.write(f"LAST-MODIFIED:{timestamp}\r\n")
 
     for event in events:
@@ -70,4 +96,4 @@ with open(OUTPUT_FILE, "w", encoding="utf-8", newline="\r\n") as f:
 
     f.write("END:VCALENDAR\r\n")
 
-print(f"Wrote {OUTPUT_FILE} with {len(events)} events from {len(calendar_urls)} source calendars.")
+print(f"Wrote {OUTPUT_FILE} with {len(events)} events from {len(calendar_sources)} source calendars.")
