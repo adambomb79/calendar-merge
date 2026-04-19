@@ -13,6 +13,11 @@ CALENDARS = [
     ("ICAL_URL_VIKINGS", "🏈"),
 ]
 
+def normalize_url(url):
+    url = url.strip()
+    if url.lower().startswith("webcal://"):
+        return "https://" + url[len("webcal://"):]
+    return url
 
 def prefix_summary(event_lines, emoji):
     updated = []
@@ -33,7 +38,7 @@ calendar_sources = []
 for secret_name, emoji in CALENDARS:
     url = os.getenv(secret_name)
     if url:
-        calendar_sources.append((url.strip(), emoji, secret_name))
+        calendar_sources.append((normalize_url(url), emoji, secret_name))
 
 if not calendar_sources:
     raise RuntimeError("No calendar URLs found in GitHub Actions secrets.")
