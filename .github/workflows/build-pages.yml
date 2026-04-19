@@ -1,0 +1,63 @@
+name: Build merged calendar
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 */2 * * *"
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Build combined calendar
+        env:
+          ICAL_URL_GOPHERSFOOTBALL: ${{ secrets.ICAL_URL_GOPHERSFOOTBALL }}
+          ICAL_URL_NFLPRIMETIME: ${{ secrets.ICAL_URL_NFLPRIMETIME }}
+          ICAL_URL_TIMBERWOLVES: ${{ secrets.ICAL_URL_TIMBERWOLVES }}
+          ICAL_URL_TWINS: ${{ secrets.ICAL_URL_TWINS }}
+          ICAL_URL_VIKINGS: ${{ secrets.ICAL_URL_VIKINGS }}
+        run: python scripts/merge_ics.py
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs
+
+      - name: Commit generated files
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/combined.ics
+          git diff --staged --quiet || git commit -m "Update combined calendar"
+          git push
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
